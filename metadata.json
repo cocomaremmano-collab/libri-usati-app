@@ -1,0 +1,5 @@
+{
+  "name": "Book Cataloger",
+  "description": "App to catalog lots of books with photos saved to Google Drive.",
+  "requestFramePermissions": ["camera"]
+}

@@ -159,7 +159,7 @@ async function startServer() {
   });
 
   // API 404 Handler - MUST be before Vite middleware
-  app.use("/api/*", (req, res) => {
+app.use("/api", (req, res) => {
     console.log(`[API] 404 Not Found: ${req.method} ${req.originalUrl}`);
     res.status(404).json({ error: `API endpoint not found: ${req.method} ${req.originalUrl}` });
   });

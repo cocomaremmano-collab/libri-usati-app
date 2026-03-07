@@ -4,7 +4,7 @@ declare global {
   }
 }
 
-export const processImage = async (file: Blob, autoStraighten: boolean = false, removeBackground: boolean = false): Promise<Blob> => {
+export const processImage = async (file: Blob, autoStraighten: boolean = false): Promise<Blob> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -27,7 +27,6 @@ export const processImage = async (file: Blob, autoStraighten: boolean = false, 
       let hierarchy: any = null;
       let approx: any = null;
       let M: any = null;
-      let mask: any = null;
 
       try {
         if (window.cv && window.cv.Mat) {
@@ -36,56 +35,6 @@ export const processImage = async (file: Blob, autoStraighten: boolean = false, 
           // Create source matrix from image
           srcMat = cv.imread(img);
           
-          if (removeBackground) {
-            // Convert to HSV for better color segmentation
-            let hsv = new cv.Mat();
-            cv.cvtColor(srcMat, hsv, cv.COLOR_RGBA2RGB); // Ensure RGB first
-            cv.cvtColor(hsv, hsv, cv.COLOR_RGB2HSV);
-
-            // Define Green Range (approximate for green screen)
-            // H: 35-85, S: 50-255, V: 50-255
-            let lowerGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [35, 50, 50, 0]);
-            let upperGreen = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [85, 255, 255, 255]);
-            
-            // Define Black Range (approximate for black screen)
-            // H: 0-180, S: 0-255, V: 0-30 (Very dark)
-            let lowerBlack = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [0, 0, 0, 0]);
-            let upperBlack = new cv.Mat(hsv.rows, hsv.cols, hsv.type(), [180, 255, 40, 255]); // Increased V slightly
-
-            let maskGreen = new cv.Mat();
-            let maskBlack = new cv.Mat();
-            
-            cv.inRange(hsv, lowerGreen, upperGreen, maskGreen);
-            cv.inRange(hsv, lowerBlack, upperBlack, maskBlack);
-            
-            // Combine masks
-            mask = new cv.Mat();
-            cv.bitwise_or(maskGreen, maskBlack, mask);
-            
-            // Invert mask (we want to KEEP the book, which is NOT green/black)
-            cv.bitwise_not(mask, mask);
-            
-            // Apply mask to alpha channel
-            let rgbaPlanes = new cv.MatVector();
-            cv.split(srcMat, rgbaPlanes);
-            
-            // Set alpha channel based on mask
-            // But first, let's clean up the mask with morphology
-            let kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5));
-            cv.morphologyEx(mask, mask, cv.MORPH_OPEN, kernel);
-            cv.morphologyEx(mask, mask, cv.MORPH_CLOSE, kernel);
-            
-            // Update Alpha channel
-            rgbaPlanes.set(3, mask);
-            cv.merge(rgbaPlanes, srcMat);
-
-            // Cleanup
-            hsv.delete(); lowerGreen.delete(); upperGreen.delete();
-            lowerBlack.delete(); upperBlack.delete();
-            maskGreen.delete(); maskBlack.delete();
-            rgbaPlanes.delete(); kernel.delete();
-          }
-
           if (autoStraighten) {
              // Preprocessing for contour detection
             let gray = new cv.Mat();
@@ -209,7 +158,7 @@ export const processImage = async (file: Blob, autoStraighten: boolean = false, 
               var sourceWidth = tempCanvas.width;
               var sourceHeight = tempCanvas.height;
             } else {
-              // No quad found, use original (potentially with background removed)
+              // No quad found, use original
               let tempCanvas = document.createElement('canvas');
               cv.imshow(tempCanvas, srcMat);
               var sourceDrawable: any = tempCanvas;
@@ -217,7 +166,7 @@ export const processImage = async (file: Blob, autoStraighten: boolean = false, 
               var sourceHeight = tempCanvas.height;
             }
           } else {
-            // Auto-straighten disabled but maybe background removed
+            // Auto-straighten disabled
             let tempCanvas = document.createElement('canvas');
             cv.imshow(tempCanvas, srcMat);
             var sourceDrawable: any = tempCanvas;
@@ -244,15 +193,14 @@ export const processImage = async (file: Blob, autoStraighten: boolean = false, 
         if (hierarchy) hierarchy.delete();
         if (approx) approx.delete();
         if (M) M.delete();
-        if (mask) mask.delete();
       }
 
       // --- Resize & Convert Logic ---
       let width = sourceWidth;
       let height = sourceHeight;
       
-      // Calculate new dimensions (max 2560px on longest side - INCREASED QUALITY)
-      const MAX_SIZE = 2560;
+      // Calculate new dimensions (max 3840px on longest side - 4K QUALITY)
+      const MAX_SIZE = 3840;
       if (width > height) {
         if (width > MAX_SIZE) {
           height = Math.round(height * (MAX_SIZE / width));
@@ -278,7 +226,7 @@ export const processImage = async (file: Blob, autoStraighten: boolean = false, 
         } else {
           reject(new Error('Failed to convert image to WebP'));
         }
-      }, 'image/webp', 0.95); // Quality 0.95 (INCREASED)
+      }, 'image/webp', 1.0); // Quality 1.0 (MAXIMUM)
     };
     
     img.onerror = () => {

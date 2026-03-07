@@ -53,7 +53,6 @@ export default function App() {
   const [photoType, setPhotoType] = useState<'front' | 'back' | 'extra'>('front');
   const [flash, setFlash] = useState(false);
   const [autoStraighten, setAutoStraighten] = useState(true); // Default to true as requested
-  const [removeBackground, setRemoveBackground] = useState(true);
 
   // --- Archive State ---
 
@@ -222,11 +221,11 @@ export default function App() {
         }
 
         // If auto-straighten is on, we should process it in background and update the photo
-        if (autoStraighten || removeBackground) {
+        if (autoStraighten) {
           try {
             const blob = dataURLtoBlob(imageSrc);
-            // Process with autoStraighten and removeBackground
-            const processedBlob = await processImage(blob, autoStraighten, removeBackground);
+            // Process with autoStraighten
+            const processedBlob = await processImage(blob, autoStraighten);
             
             // Convert back to base64
             const reader = new FileReader();
@@ -248,7 +247,7 @@ export default function App() {
         }
       }
     }
-  }, [webcamRef, currentBook, photoType, autoStraighten, removeBackground]);
+  }, [webcamRef, currentBook, photoType, autoStraighten]);
 
   const saveCurrentBook = () => {
     if (currentBook) {
@@ -610,16 +609,6 @@ export default function App() {
                           <Crop className="w-5 h-5" />
                         </div>
                         <span>{autoStraighten ? 'AUTO' : 'OFF'}</span>
-                      </button>
-                      
-                      <button 
-                        onClick={() => setRemoveBackground(!removeBackground)}
-                        className={`flex flex-col items-center justify-center gap-1 font-medium text-xs active:scale-95 transition-transform ${removeBackground ? 'text-emerald-400' : 'text-zinc-500'}`}
-                      >
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${removeBackground ? 'bg-emerald-600 text-white shadow-emerald-900/50' : 'bg-zinc-800 text-zinc-400'}`}>
-                          <Scissors className="w-5 h-5" />
-                        </div>
-                        <span>BG</span>
                       </button>
                     </div>
 

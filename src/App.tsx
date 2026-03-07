@@ -1,8 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import Webcam from 'react-webcam';
 import { Camera, FolderPlus, Upload, Plus, X, Check, Image as ImageIcon, Trash2, Folder, ChevronRight, ArrowLeft, RefreshCw, HardDrive, Zap, Crop, Scissors } from 'lucide-react';
 import { b2ListFiles, b2CreateFolder, b2UploadFile, b2DeleteFile, b2DeleteFolder } from './utils/b2';
-import { processImage } from './utils/image';
 
 interface Photo {
   id: string;
@@ -48,11 +46,10 @@ export default function App() {
   const [books, setBooks] = useState<Book[]>([]);
   const [currentBook, setCurrentBook] = useState<Book | null>(null);
   
-  const webcamRef = useRef<Webcam>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [photoType, setPhotoType] = useState<'front' | 'back' | 'extra'>('front');
   const [flash, setFlash] = useState(false);
-  const [autoStraighten, setAutoStraighten] = useState(true); // Default to true as requested
 
   // --- Archive State ---
 
@@ -191,14 +188,20 @@ export default function App() {
     setTimeout(() => setFlash(false), 150);
   };
 
-  const capturePhoto = useCallback(async () => {
-    if (webcamRef.current && currentBook) {
-      const imageSrc = webcamRef.current.getScreenshot();
-      if (imageSrc) {
-        triggerFlash();
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  const handleNativeCameraCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const imageSrc = reader.result as string;
         
+        // Process the image just like a webcam capture
+        triggerFlash();
         const tempId = Date.now().toString();
         
+        // Initial photo object
         const newPhoto: Photo = {
           id: tempId,
           dataUrl: imageSrc,
@@ -219,35 +222,13 @@ export default function App() {
         } else if (photoType === 'back') {
           setTimeout(() => setPhotoType('extra'), 200);
         }
-
-        // If auto-straighten is on, we should process it in background and update the photo
-        if (autoStraighten) {
-          try {
-            const blob = dataURLtoBlob(imageSrc);
-            // Process with autoStraighten
-            const processedBlob = await processImage(blob, autoStraighten);
-            
-            // Convert back to base64
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const processedDataUrl = reader.result as string;
-              
-              setCurrentBook(prev => {
-                if (!prev) return prev;
-                return {
-                  ...prev,
-                  photos: prev.photos.map(p => p.id === tempId ? { ...p, dataUrl: processedDataUrl } : p)
-                };
-              });
-            };
-            reader.readAsDataURL(processedBlob);
-          } catch (e) {
-            console.error("Image processing failed", e);
-          }
-        }
-      }
+      };
+      reader.readAsDataURL(file);
     }
-  }, [webcamRef, currentBook, photoType, autoStraighten]);
+    // Reset input so we can select the same file again if needed (though unlikely for camera)
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (galleryInputRef.current) galleryInputRef.current.value = '';
+  };
 
   const saveCurrentBook = () => {
     if (currentBook) {
@@ -289,16 +270,21 @@ export default function App() {
         const photo = book.photos[i];
         const blob = dataURLtoBlob(photo.dataUrl);
         
-        // Process image (resize + webp)
-        const processedBlob = await processImage(blob);
+        // Determine extension from mime type
+        const mimeType = blob.type;
+        let ext = 'jpg';
+        if (mimeType === 'image/png') ext = 'png';
+        else if (mimeType === 'image/webp') ext = 'webp';
+        else if (mimeType === 'image/jpeg') ext = 'jpg';
+        else if (mimeType.includes('heic')) ext = 'heic';
         
         let fileName = `Libro_${book.number}_${photo.type}`;
         if (photo.type === 'extra') fileName += `_${i}`;
-        fileName += '.webp';
+        fileName += `.${ext}`;
         
         const fullFileName = `${bookFolderPath}${fileName}`;
         
-        await b2UploadFile(processedBlob, fullFileName, 'image/webp');
+        await b2UploadFile(blob, fullFileName, mimeType);
       }
 
       setBooks(prev => prev.map(b => b.id === book.id ? { ...b, uploaded: true, uploading: false, folderPath: bookFolderPath } : b));
@@ -370,7 +356,10 @@ export default function App() {
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <HardDrive className="w-5 h-5 text-indigo-600" />
-            <h1 className="font-semibold text-base tracking-tight">Book Cataloger</h1>
+            <div>
+              <h1 className="font-semibold text-base tracking-tight leading-none">Book Cataloger</h1>
+              <span className="text-[10px] text-zinc-400 font-mono">v2.2 Native Raw</span>
+            </div>
           </div>
           <div className="flex gap-1 bg-zinc-100 p-1 rounded-lg">
             <button 
@@ -550,9 +539,9 @@ export default function App() {
                   <div>
                     <h2 className="text-white font-bold text-lg drop-shadow-md">Libro {currentBook.number}</h2>
                     <div className="flex gap-2 mt-1">
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${photoType === 'front' ? 'bg-indigo-600 text-white' : 'bg-black/40 text-white/60'}`}>FRONTE</span>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${photoType === 'back' ? 'bg-indigo-600 text-white' : 'bg-black/40 text-white/60'}`}>RETRO</span>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${photoType === 'extra' ? 'bg-indigo-600 text-white' : 'bg-black/40 text-white/60'}`}>EXTRA</span>
+                      <button onClick={() => setPhotoType('front')} className={`text-xs font-bold px-3 py-1 rounded-full transition-colors ${photoType === 'front' ? 'bg-indigo-600 text-white' : 'bg-white/20 text-white/80'}`}>FRONTE</button>
+                      <button onClick={() => setPhotoType('back')} className={`text-xs font-bold px-3 py-1 rounded-full transition-colors ${photoType === 'back' ? 'bg-indigo-600 text-white' : 'bg-white/20 text-white/80'}`}>RETRO</button>
+                      <button onClick={() => setPhotoType('extra')} className={`text-xs font-bold px-3 py-1 rounded-full transition-colors ${photoType === 'extra' ? 'bg-indigo-600 text-white' : 'bg-white/20 text-white/80'}`}>EXTRA</button>
                     </div>
                   </div>
                   <button onClick={cancelCurrentBook} className="p-2 bg-black/40 backdrop-blur-md rounded-full text-white hover:bg-white/20 transition-colors">
@@ -560,22 +549,33 @@ export default function App() {
                   </button>
                 </div>
                 
-                {/* Camera Viewport */}
-                <div className="flex-grow relative bg-zinc-900">
-                  <Webcam
-                    audio={false}
-                    ref={webcamRef}
-                    screenshotFormat="image/jpeg"
-                    videoConstraints={{ 
-                      facingMode: "environment",
-                      // @ts-ignore
-                      advanced: [{ focusMode: "continuous" }]
-                    }}
-                    className="absolute inset-0 w-full h-full object-cover"
-                  />
+                {/* Camera Viewport Placeholder / Last Photo Preview */}
+                <div className="flex-grow relative bg-zinc-900 flex flex-col items-center justify-center p-6">
+                  {currentBook.photos.length > 0 ? (
+                    <div className="relative w-full max-w-sm aspect-[3/4] rounded-2xl overflow-hidden shadow-2xl border border-zinc-700">
+                      <img 
+                        src={currentBook.photos[currentBook.photos.length - 1].dataUrl} 
+                        className="w-full h-full object-cover" 
+                        alt="Last captured" 
+                      />
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/60 backdrop-blur-sm p-3 text-white text-center text-sm font-medium">
+                        Ultima foto scattata
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center text-zinc-500 gap-4 text-center px-4">
+                      <div className="w-24 h-24 rounded-full bg-zinc-800 flex items-center justify-center animate-pulse">
+                        <Camera className="w-10 h-10 opacity-50" />
+                      </div>
+                      <div>
+                        <p className="text-lg font-medium text-zinc-400">Fotocamera Web Disattivata</p>
+                        <p className="text-sm text-zinc-600 mt-1">Usa il pulsante in basso per scattare con l'app nativa del telefono.</p>
+                      </div>
+                    </div>
+                  )}
                   
-                  {/* Guidelines */}
-                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                  {/* Guidelines (Optional, maybe less useful without live preview but keeps style) */}
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-20">
                     <div className="w-[80%] h-[70%] border border-white/30 rounded-lg relative">
                       <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-white"></div>
                       <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-white"></div>
@@ -599,29 +599,32 @@ export default function App() {
                   )}
                   
                   <div className="w-full flex justify-between items-center px-2">
-                    {/* Auto-Straighten Toggle */}
-                    <div className="w-32 flex justify-start gap-2">
+                    <div className="w-20"></div> {/* Spacer */}
+
+                    {/* Shutter Button */}
+                    <div className="flex items-center gap-4">
+                      {/* Native Camera Button (Hidden Input + Trigger) */}
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        capture="environment"
+                        ref={fileInputRef}
+                        onChange={handleNativeCameraCapture}
+                        className="hidden"
+                      />
+
                       <button 
-                        onClick={() => setAutoStraighten(!autoStraighten)}
-                        className={`flex flex-col items-center justify-center gap-1 font-medium text-xs active:scale-95 transition-transform ${autoStraighten ? 'text-indigo-400' : 'text-zinc-500'}`}
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center bg-white/10 active:bg-white active:scale-95 transition-all shadow-lg"
                       >
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${autoStraighten ? 'bg-indigo-600 text-white shadow-indigo-900/50' : 'bg-zinc-800 text-zinc-400'}`}>
-                          <Crop className="w-5 h-5" />
+                        <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center">
+                          <Camera className="w-8 h-8 text-zinc-900" />
                         </div>
-                        <span>{autoStraighten ? 'AUTO' : 'OFF'}</span>
                       </button>
                     </div>
 
-                    {/* Shutter Button */}
-                    <button 
-                      onClick={capturePhoto}
-                      className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center bg-white/10 active:bg-white active:scale-95 transition-all shadow-lg"
-                    >
-                      <div className="w-16 h-16 rounded-full bg-white"></div>
-                    </button>
-
                     {/* Done Button */}
-                    <div className="w-16 flex justify-end">
+                    <div className="w-20 flex justify-end">
                       {currentBook.photos.length >= 2 && (
                         <button 
                           onClick={saveCurrentBook}

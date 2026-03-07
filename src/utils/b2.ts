@@ -69,3 +69,19 @@ export const b2CreateFolder = async (folderPath: string) => {
   return await response.json();
 };
 
+export const b2DeleteFolder = async (folderPath: string) => {
+  const response = await fetch('/api/b2/delete-folder', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ folderPath })
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to delete folder');
+  }
+  return await response.json();
+};
+

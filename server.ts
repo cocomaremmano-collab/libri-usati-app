@@ -1,6 +1,6 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
-import { S3Client, ListObjectsV2Command, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, ListObjectsV2Command, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import multer from "multer";
 import path from "path";
@@ -158,8 +158,50 @@ async function startServer() {
     }
   });
 
+  app.post("/api/b2/delete-folder", async (req, res) => {
+    try {
+      const folderPath = req.body.folderPath;
+      
+      if (!folderPath) {
+        return res.status(400).json({ error: "Folder path is required" });
+      }
+
+      let isTruncated = true;
+      let continuationToken = undefined;
+
+      while (isTruncated) {
+        const listCommand = new ListObjectsV2Command({
+          Bucket: BUCKET_NAME,
+          Prefix: folderPath,
+          ContinuationToken: continuationToken
+        });
+
+        const listResponse = await s3Client.send(listCommand);
+        
+        if (listResponse.Contents && listResponse.Contents.length > 0) {
+          const objectsToDelete = listResponse.Contents.map(obj => ({ Key: obj.Key }));
+          
+          const deleteCommand = new DeleteObjectsCommand({
+            Bucket: BUCKET_NAME,
+            Delete: { Objects: objectsToDelete }
+          });
+          
+          await s3Client.send(deleteCommand);
+        }
+
+        isTruncated = listResponse.IsTruncated || false;
+        continuationToken = listResponse.NextContinuationToken;
+      }
+
+      res.json({ folderPath });
+    } catch (error: any) {
+      console.error("S3 Delete Folder Error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // API 404 Handler - MUST be before Vite middleware
-app.use("/api", (req, res) => {
+  app.use("/api", (req, res) => {
     console.log(`[API] 404 Not Found: ${req.method} ${req.originalUrl}`);
     res.status(404).json({ error: `API endpoint not found: ${req.method} ${req.originalUrl}` });
   });
@@ -176,8 +218,8 @@ app.use("/api", (req, res) => {
     app.use(express.static(path.join(__dirname, "dist")));
 
     // Handle SPA routing - send index.html for any other request
-app.get(/.*/, (req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"));
+    app.get(/.*/, (req, res) => {
+      res.sendFile(path.join(__dirname, "dist", "index.html"));
     });
   }
 

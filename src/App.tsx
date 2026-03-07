@@ -1,7 +1,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Webcam from 'react-webcam';
-import { Camera, FolderPlus, Upload, Plus, X, Check, Image as ImageIcon, Trash2, Folder, ChevronRight, ArrowLeft, RefreshCw, HardDrive, Zap } from 'lucide-react';
-import { b2ListFiles, b2CreateFolder, b2UploadFile, b2DeleteFile } from './utils/b2';
+import { Camera, FolderPlus, Upload, Plus, X, Check, Image as ImageIcon, Trash2, Folder, ChevronRight, ArrowLeft, RefreshCw, HardDrive, Zap, Crop, Scissors } from 'lucide-react';
+import { b2ListFiles, b2CreateFolder, b2UploadFile, b2DeleteFile, b2DeleteFolder } from './utils/b2';
 import { processImage } from './utils/image';
 
 interface Photo {
@@ -52,8 +52,12 @@ export default function App() {
   const [cameraActive, setCameraActive] = useState(false);
   const [photoType, setPhotoType] = useState<'front' | 'back' | 'extra'>('front');
   const [flash, setFlash] = useState(false);
+  const [autoStraighten, setAutoStraighten] = useState(true); // Default to true as requested
+  const [removeBackground, setRemoveBackground] = useState(true);
 
   // --- Archive State ---
+
+
   const [archivePath, setArchivePath] = useState<{id: string, name: string}[]>([{id: 'root', name: 'Archivio'}]);
   const [archiveItems, setArchiveItems] = useState<StorageItem[]>([]);
   const [isLoadingArchive, setIsLoadingArchive] = useState(false);
@@ -188,14 +192,16 @@ export default function App() {
     setTimeout(() => setFlash(false), 150);
   };
 
-  const capturePhoto = useCallback(() => {
+  const capturePhoto = useCallback(async () => {
     if (webcamRef.current && currentBook) {
       const imageSrc = webcamRef.current.getScreenshot();
       if (imageSrc) {
         triggerFlash();
         
+        const tempId = Date.now().toString();
+        
         const newPhoto: Photo = {
-          id: Date.now().toString(),
+          id: tempId,
           dataUrl: imageSrc,
           type: photoType
         };
@@ -214,9 +220,35 @@ export default function App() {
         } else if (photoType === 'back') {
           setTimeout(() => setPhotoType('extra'), 200);
         }
+
+        // If auto-straighten is on, we should process it in background and update the photo
+        if (autoStraighten || removeBackground) {
+          try {
+            const blob = dataURLtoBlob(imageSrc);
+            // Process with autoStraighten and removeBackground
+            const processedBlob = await processImage(blob, autoStraighten, removeBackground);
+            
+            // Convert back to base64
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const processedDataUrl = reader.result as string;
+              
+              setCurrentBook(prev => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  photos: prev.photos.map(p => p.id === tempId ? { ...p, dataUrl: processedDataUrl } : p)
+                };
+              });
+            };
+            reader.readAsDataURL(processedBlob);
+          } catch (e) {
+            console.error("Image processing failed", e);
+          }
+        }
       }
     }
-  }, [webcamRef, currentBook, photoType]);
+  }, [webcamRef, currentBook, photoType, autoStraighten, removeBackground]);
 
   const saveCurrentBook = () => {
     if (currentBook) {
@@ -308,21 +340,22 @@ export default function App() {
   };
 
   const deleteDriveItem = async (item: StorageItem) => {
+    if (item.isFolder) {
+      if (!confirm(`ATTENZIONE: Stai per eliminare la cartella "${item.name}" e TUTTI i file al suo interno.\n\nQuesta azione NON può essere annullata.\n\nSei sicuro di voler procedere?`)) return;
+      
+      try {
+        await b2DeleteFolder(item.fullName);
+        fetchArchiveItems(archivePath[archivePath.length - 1].id);
+      } catch (error) {
+        console.error(error);
+        alert("Errore eliminazione cartella");
+      }
+      return;
+    }
+
     if (!confirm(`Eliminare "${item.name}"?`)) return;
     
     try {
-      // Note: Client-side recursive delete is dangerous and complex.
-      // For now, we only support deleting single files or empty folders.
-      // Or we implement a simple recursive delete here.
-      
-      if (item.isFolder) {
-         // Recursive delete logic would go here, but for safety in client-side mode
-         // let's restrict to empty folders or warn user.
-         // Actually, let's try to delete. If it has files, we need to list and delete them.
-         alert("L'eliminazione di cartelle piene non è ancora supportata in modalità client-side per sicurezza.");
-         return;
-      }
-      
       await b2DeleteFile(item.fullName, item.id);
       fetchArchiveItems(archivePath[archivePath.length - 1].id);
     } catch (error) {
@@ -534,7 +567,11 @@ export default function App() {
                     audio={false}
                     ref={webcamRef}
                     screenshotFormat="image/jpeg"
-                    videoConstraints={{ facingMode: "environment" }}
+                    videoConstraints={{ 
+                      facingMode: "environment",
+                      // @ts-ignore
+                      advanced: [{ focusMode: "continuous" }]
+                    }}
                     className="absolute inset-0 w-full h-full object-cover"
                   />
                   
@@ -563,8 +600,28 @@ export default function App() {
                   )}
                   
                   <div className="w-full flex justify-between items-center px-2">
-                    {/* Placeholder for balance */}
-                    <div className="w-16"></div>
+                    {/* Auto-Straighten Toggle */}
+                    <div className="w-32 flex justify-start gap-2">
+                      <button 
+                        onClick={() => setAutoStraighten(!autoStraighten)}
+                        className={`flex flex-col items-center justify-center gap-1 font-medium text-xs active:scale-95 transition-transform ${autoStraighten ? 'text-indigo-400' : 'text-zinc-500'}`}
+                      >
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${autoStraighten ? 'bg-indigo-600 text-white shadow-indigo-900/50' : 'bg-zinc-800 text-zinc-400'}`}>
+                          <Crop className="w-5 h-5" />
+                        </div>
+                        <span>{autoStraighten ? 'AUTO' : 'OFF'}</span>
+                      </button>
+                      
+                      <button 
+                        onClick={() => setRemoveBackground(!removeBackground)}
+                        className={`flex flex-col items-center justify-center gap-1 font-medium text-xs active:scale-95 transition-transform ${removeBackground ? 'text-emerald-400' : 'text-zinc-500'}`}
+                      >
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${removeBackground ? 'bg-emerald-600 text-white shadow-emerald-900/50' : 'bg-zinc-800 text-zinc-400'}`}>
+                          <Scissors className="w-5 h-5" />
+                        </div>
+                        <span>BG</span>
+                      </button>
+                    </div>
 
                     {/* Shutter Button */}
                     <button 
